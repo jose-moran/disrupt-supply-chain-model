@@ -8,42 +8,48 @@ def compareProductionPurchasePlans(firm_list, country_list, households):
         dic_agent_id_to_sector[country.pid] = "IMP"
 
     # Evalute purchase plans
-    ## of firms
+    # of firms
     df = pd.DataFrame({firm.pid: firm.purchase_plan for firm in firm_list})
     df["tot_purchase_planned_by_firms"] = df.sum(axis=1)
     df['input_sector'] = df.index.map(dic_agent_id_to_sector)
     df_firms = df.groupby('input_sector')["tot_purchase_planned_by_firms"].sum()
 
-    ## of countries
-    df = pd.DataFrame({country.pid: country.purchase_plan for country in country_list})
+    # of countries
+    df = pd.DataFrame(
+        {country.pid: country.purchase_plan for country in country_list})
     df["tot_purchase_planned_by_countries"] = df.sum(axis=1)
     df['input_sector'] = df.index.map(dic_agent_id_to_sector)
-    df_countries = df.groupby('input_sector')["tot_purchase_planned_by_countries"].sum()
- 
-    ## of households
-    df = pd.DataFrame({"tot_purchase_planned_by_households": households.purchase_plan})
-    df['input_sector'] = df.index.map(dic_agent_id_to_sector)
-    df_households = df.groupby('input_sector')["tot_purchase_planned_by_households"].sum()
+    df_countries = df.groupby('input_sector')[
+        "tot_purchase_planned_by_countries"].sum()
 
-    ## concat
-    df_purchase_plan = pd.concat([df_firms, df_countries, df_households], axis=1, sort=True)
+    # of households
+    df = pd.DataFrame(
+        {"tot_purchase_planned_by_households": households.purchase_plan})
+    df['input_sector'] = df.index.map(dic_agent_id_to_sector)
+    df_households = df.groupby('input_sector')[
+        "tot_purchase_planned_by_households"].sum()
+
+    # concat
+    df_purchase_plan = pd.concat(
+        [df_firms, df_countries, df_households], axis=1, sort=True)
 
     # Evalute productions/sales
-    ## of firms
+    # of firms
     df = pd.DataFrame({"tot_production_per_firm":
-        {firm.pid: firm.production for firm in firm_list}
-    })
+                       {firm.pid: firm.production for firm in firm_list}
+                       })
     df['sector'] = df.index.map(dic_agent_id_to_sector)
     df_firms = df.groupby('sector')["tot_production_per_firm"].sum()
 
-    ## of countries
+    # of countries
     df = pd.DataFrame({"tot_production_per_country":
-        {country.pid: country.qty_sold for country in country_list}
-    })
+                       {country.pid: country.qty_sold
+                           for country in country_list}
+                       })
     df['sector'] = df.index.map(dic_agent_id_to_sector)
     df_countries = df.groupby('sector')["tot_production_per_country"].sum()
 
-    ## concat
+    # concat
     df_sales = pd.concat([df_firms, df_countries], axis=1, sort=True)
 
     # Compare
@@ -54,8 +60,8 @@ def compareProductionPurchasePlans(firm_list, country_list, households):
         - res['tot_production_per_firm'] - res['tot_production_per_country']
     boolindex_unbalanced = res['dif'] > 1e-6
     if boolindex_unbalanced.sum() > 0:
-        logging.warn("Sales does not equate purchases for sectors: "+
-            str(res.index[boolindex_unbalanced].tolist()))
+        logging.warn("Sales does not equate purchases for sectors: " +
+                     str(res.index[boolindex_unbalanced].tolist()))
 
 
 def compareDeliveredVsReceived():
