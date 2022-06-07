@@ -6,17 +6,23 @@ import networkx as nx
 from shapely.geometry import Point
 
 
-from typing import List
+from typing import Union
 from class_firm import Firm
 from class_households import Households
 from class_transport_network import TransportNetwork
 from class_country import Country
 
 
-def load_transport_data(filepaths: List[str],
+ROAD_ERROR = "'edge_type' should be 'roads',\
+     'railways', 'waterways', or 'multimodal'"
+
+
+def load_transport_data(filepaths: list[str],
                         transport_params: dict,
                         transport_mode: str,
-                        additional_roads: bool = False):
+                        additional_roads: bool = False) ->\
+    Union[gpd.GeoDataFrame,
+          tuple[gpd.GeoDataFrame, gpd.GeoDataFrame]]:
     # Determines whether there are nodes and/or edges to load
     any_edge = False
     any_node = False
@@ -95,9 +101,9 @@ def load_transport_data(filepaths: List[str],
         return edges
 
 
-def comp_cost_ttime_edges(edges: pd.DataFrame,
+def comp_cost_ttime_edges(edges: gpd.GeoDataFrame,
                           transport_params: dict,
-                          edge_type: str):
+                          edge_type: str) -> gpd.GeoDataFrame:
     # A. Compute price per ton to be paid to transporter
     # A1. Cost per km
     assign_all_transport_costs(edges=edges,
@@ -111,28 +117,13 @@ def comp_cost_ttime_edges(edges: pd.DataFrame,
 
     # B. Compute generalized cost of transport
     # B.1a. Compute travel time
-    if edge_type == "roads":
-        # Differentiate between paved and unpaved roads
-        edges['travel_time'] = edges['km'] * (
-            (edges['surface'] == 'unpaved') / transport_params['speeds']['roads']['unpaved'] +
-            (edges['surface'] == 'paved') /
-            transport_params['speeds']['roads']['paved']
-        )
-    elif edge_type in ['railways', 'waterways', 'maritime']:
-        edges['travel_time'] = edges['km'] / \
-            transport_params['speeds'][edge_type]
-
-    elif edge_type == "multimodal":
-        edges['travel_time'] = edges['km'] / \
-            edges['multimodes'].map(transport_params['loading_time'])
-
-    else:
-        raise ValueError(
-            "'edge_type' should be 'roads', 'railways', 'waterways', or 'multimodal'")
+    assign_road_travel_time(edges=edges,
+                            transport_params=transport_params,
+                            edge_type=edge_type)
 
     # B.1b. Add crossing border time
-    edges.loc[edges['special'].str.contains("custom", na=False), "travel_time"] = \
-        edges.loc[edges['special'].str.contains("custom", na=False), "type"] \
+    edges.loc[special_custom, "travel_time"] = \
+        edges.loc[special_custom, "type"] \
         .map(transport_params['custom_time'])
 
     # B.2. Compute cost of travel time
@@ -140,30 +131,9 @@ def comp_cost_ttime_edges(edges: pd.DataFrame,
         transport_params["travel_cost_of_time"]
 
     # B.3. Compute variability cost
-    if edge_type == "roads":
-        # Differentiate between paved and unpaved roads
-        edges['cost_variability'] = edges['cost_travel_time'] * \
-            transport_params['variability_coef'] * (
-                (edges['surface'] == 'unpaved') * transport_params["variability"]['roads']['unpaved'] +
-                (edges['surface'] == 'paved') *
-            transport_params['variability']['roads']['paved']
-        )
-
-    elif edge_type in ['railways', 'waterways', 'maritime']:
-        edges['cost_variability'] = edges['cost_travel_time'] * \
-            transport_params['variability_coef'] * \
-            transport_params["variability"][edge_type]
-
-    elif edge_type == "multimodal":
-        edges['cost_variability'] = edges['cost_travel_time'] * \
-            transport_params['variability_coef'] * \
-            edges['multimodes'].map(
-                transport_params['variability']['multimodal'])
-
-    else:
-        raise ValueError(
-            "'edge_type' should be 'roads', 'railways', 'waterways', or 'multimodal'")
-
+    assign_road_variability(edges=edges,
+                            transport_params=transport_params,
+                            edge_type=edge_type)
     # B.4. Finally, add up both cost to get the cost of time of each road edges
     edges['time_cost'] = edges['cost_travel_time'] + edges['cost_variability']
 
@@ -173,7 +143,7 @@ def comp_cost_ttime_edges(edges: pd.DataFrame,
     return edges
 
 
-def assign_road_costs(edges: pd.DataFrame, cost_per_ton: dict):
+def assign_road_costs(edges: gpd.GeoDataFrame, cost_per_ton: dict):
     # Differentiate between paved and unpaved roads
     unpaved_cost = cost_per_ton['roads']['unpaved)']
     paved_cost = cost_per_ton['roads']['paved']
@@ -183,7 +153,7 @@ def assign_road_costs(edges: pd.DataFrame, cost_per_ton: dict):
     )
 
 
-def assign_all_transport_costs(edges: pd.DataFrame,
+def assign_all_transport_costs(edges: gpd.GeoDataFrame,
                                transport_params: dict,
                                edge_type: str):
     cost_per_ton = transport_params['transport_cost_per_tonkm']
@@ -197,9 +167,60 @@ def assign_all_transport_costs(edges: pd.DataFrame,
             transport_params['loading_cost_per_ton'])
 
     else:
-        raise ValueError(
-            "'edge_type' should be 'roads', 'railways',\
-                 'waterways', or 'multimodal'")
+        raise ValueError(ROAD_ERROR)
+
+
+def assign_road_travel_time(edges: gpd.GeoDataFrame,
+                            transport_params: dict,
+                            edge_type: str):
+
+    speed_dict = transport_params['speeds']
+    if edge_type == "roads":
+        # Differentiate between paved and unpaved roads
+        edges['travel_time'] = edges['km'] * (
+            (edges['surface'] == 'unpaved') / speed_dict['roads']['unpaved'] +
+            (edges['surface'] == 'paved') /
+            speed_dict['roads']['paved']
+        )
+    elif edge_type in ['railways', 'waterways', 'maritime']:
+        edges['travel_time'] = edges['km'] / \
+            speed_dict[edge_type]
+
+    elif edge_type == "multimodal":
+        edges['travel_time'] = edges['km'] / \
+            edges['multimodes'].map(transport_params['loading_time'])
+
+    else:
+        raise ValueError(ROAD_ERROR)
+
+
+def assign_road_variability(edges: gpd.GeoDataFrame,
+                            transport_params: dict,
+                            edge_type: str):
+    varia_dict = transport_params["variability"]
+    if edge_type == "roads":
+        # Differentiate between paved and unpaved roads
+        edges['cost_variability'] = edges['cost_travel_time'] * \
+            transport_params['variability_coef'] * (
+                (edges['surface'] == 'unpaved') *
+                varia_dict['roads']['unpaved'] +
+                (edges['surface'] == 'paved') *
+            varia_dict['roads']['paved']
+        )
+
+    elif edge_type in ['railways', 'waterways', 'maritime']:
+        edges['cost_variability'] = edges['cost_travel_time'] * \
+            transport_params['variability_coef'] * \
+            varia_dict[edge_type]
+
+    elif edge_type == "multimodal":
+        edges['cost_variability'] = edges['cost_travel_time'] * \
+            transport_params['variability_coef'] * \
+            edges['multimodes'].map(
+                varia_dict['multimodal'])
+
+    else:
+        raise ValueError(ROAD_ERROR)
 
 
 def offset_ids(nodes, edges, offset_node_id, offset_edge_id):
@@ -236,7 +257,8 @@ def assign_endpoints_one_edge(row, df_nodes):
 
 
 def assign_endpoints(df_links, df_nodes):
-    return df_links.apply(lambda row: assign_endpoints_one_edge(row, df_nodes), axis=1)
+    return df_links.apply(lambda row: assign_endpoints_one_edge(row, df_nodes),
+                          axis=1)
 
 
 def get_endpoints_from_line(linestring_obj):
@@ -251,12 +273,19 @@ def get_idx_closest_pt(point, df_with_points):
     return int(df_with_points.index[distList.index(min(distList))])
 
 
-def create_transp_netwrk(transport_modes, filepaths, transport_params, extra_roads=False):
+def create_transp_netwrk(transport_modes: list,
+                         filepaths: list,
+                         transport_params: dict,
+                         extra_roads: bool = False) -> tuple[TransportNetwork,
+                                                             gpd.GeoDataFrame,
+                                                             gpd.GeoDataFrame]:
     """Create the transport network object
 
     It uses one shapefile for the nodes and another for the edges.
-    Note that therea are strong constraints on these files, in particular on their attributes. 
-    We can optionally use an additional edge shapefile, which contains extra road segments. Useful for scenario testing.
+    Note that there are strong constraints on these files, in particular on
+    their attributes. 
+    We can optionally use an additional edge shapefile, which contains extra
+    road segments. Useful for scenario testing.
 
     Parameters
     ----------
@@ -281,76 +310,42 @@ def create_transp_netwrk(transport_modes, filepaths, transport_params, extra_roa
     # Load node and edge data
     # Load in the following order: roads, railways, waterways
     # Ids are adjusted to be unique
-    # E.g., if roads and railways are included, the ids of railways nodes are offset such that
+    # E.g., if roads and railways are included, the ids of railways nodes
+    #  are offset such that
     # the first railway node id is the last road node id + 1
     # similarly for edges
     # the nodes ids in "end1", "end2" of edges are also offseted
     logging.debug('Loading roads data')
-    nodes, edges = load_transport_data(filepaths, transport_params,
-                                       transport_mode="roads", additional_roads=extra_roads)
-    logging.debug(str(nodes.shape[0])+" roads nodes and " +
-                  str(edges.shape[0]) + " roads edges")
+    nodes, edges = load_transport_data(filepaths,
+                                       transport_params,
+                                       transport_mode="roads",
+                                       additional_roads=extra_roads)
+    logging.debug(f"{nodes.shape[0]} roads nodes and " +
+                  f"{edges.shape[0]} roads edges")
 
     if "railways" in transport_modes:
-        logging.debug('Loading railways data')
-        railways_nodes, railways_edges = load_transport_data(
-            filepaths, transport_params, "railways")
-        logging.debug(str(railways_nodes.shape[0])+" railways nodes and " +
-                      str(railways_edges.shape[0]) + " railways edges")
-        railways_nodes, railways_edges = offset_ids(railways_nodes, railways_edges,
-                                                    offset_node_id=nodes['id'].max(
-                                                    )+1,
-                                                    offset_edge_id=edges['id'].max()+1)
-        nodes = nodes.append(railways_nodes, ignore_index=False,
-                             verify_integrity=True, sort=False)
-        edges = edges.append(railways_edges, ignore_index=False,
-                             verify_integrity=True, sort=False)
-
+        add_railways(filepaths=filepaths,
+                     transport_params=transport_params,
+                     edges=edges,
+                     nodes=nodes)
     if "waterways" in transport_modes:
-        logging.debug('Loading waterways data')
-        waterways_nodes, waterways_edges = load_transport_data(
-            filepaths, transport_params, "waterways")
-        logging.debug(str(waterways_nodes.shape[0])+" waterways nodes and " +
-                      str(waterways_edges.shape[0]) + " waterways edges")
-        waterways_nodes, waterways_edges = offset_ids(waterways_nodes, waterways_edges,
-                                                      offset_node_id=nodes['id'].max(
-                                                      )+1,
-                                                      offset_edge_id=edges['id'].max()+1)
-        nodes = nodes.append(waterways_nodes, ignore_index=False,
-                             verify_integrity=True, sort=False)
-        edges = edges.append(waterways_edges, ignore_index=False,
-                             verify_integrity=True, sort=False)
+        add_waterways(filepaths=filepaths,
+                      transport_params=transport_params,
+                      nodes=nodes,
+                      edges=edges)
 
     if "maritime" in transport_modes:
-        logging.debug('Loading maritime data')
-        maritime_nodes, maritime_edges = load_transport_data(
-            filepaths, transport_params, "maritime")
-        logging.debug(str(maritime_nodes.shape[0])+" maritime nodes and " +
-                      str(maritime_edges.shape[0]) + " maritime edges")
-        maritime_nodes, maritime_edges = offset_ids(maritime_nodes, maritime_edges,
-                                                    offset_node_id=nodes['id'].max(
-                                                    )+1,
-                                                    offset_edge_id=edges['id'].max()+1)
-        nodes = nodes.append(maritime_nodes, ignore_index=False,
-                             verify_integrity=True, sort=False)
-        edges = edges.append(maritime_edges, ignore_index=False,
-                             verify_integrity=True, sort=False)
+        add_maritime(filepaths=filepaths,
+                     transport_params=transport_params,
+                     nodes=nodes,
+                     edges=edges)
 
     if len(transport_modes) >= 2:
-        logging.debug('Loading multimodal data')
-        multimodal_edges = load_transport_data(
-            filepaths, transport_params, "multimodal")
-        multimodal_edges = filter_mmodal_edges(
-            multimodal_edges, transport_modes)
-        logging.debug(str(multimodal_edges.shape[0]) + " multimodal edges")
-        multimodal_edges = assign_endpoints(multimodal_edges, nodes)
-        multimodal_edges['id'] = multimodal_edges['id'] + edges['id'].max() + 1
-        multimodal_edges.index = multimodal_edges['id']
-        multimodal_edges.index.name = "index"
-        edges = edges.append(multimodal_edges, ignore_index=False,
-                             verify_integrity=True, sort=False)
-        logging.debug('Total nb of transport nodes: '+str(nodes.shape[0]))
-        logging.debug('Total nb of transport edges: '+str(edges.shape[0]))
+        add_multimodal(filepaths=filepaths,
+                       transport_params=transport_params,
+                       nodes=nodes,
+                       edges=edges,
+                       transport_modes=transport_modes)
 
     # Check conformity
     if (nodes['id'].duplicated().sum() > 0):
@@ -371,6 +366,90 @@ def create_transp_netwrk(transport_modes, filepaths, transport_params, extra_roa
         T.add_transport_edge_with_nodes(road, edges, nodes)
 
     return T, nodes, edges
+
+
+def add_railways(filepaths: list,
+                 transport_params: dict,
+                 nodes: gpd.GeoDataFrame,
+                 edges: gpd.GeoDataFrame):
+    logging.debug('Loading railways data')
+    rlways_nodes, rlways_edges = load_transport_data(
+        filepaths, transport_params, "railways")
+    logging.debug(f"{rlways_nodes.shape[0]} railways nodes and " +
+                  f"{rlways_edges.shape[0]} railways edges")
+    rlways_nodes, rlways_edges = offset_ids(rlways_nodes,
+                                            rlways_edges,
+                                            offset_node_id=nodes['id']
+                                            .max()+1,
+                                            offset_edge_id=edges['id']
+                                            .max()+1)
+    nodes = nodes.append(rlways_nodes, ignore_index=False,
+                         verify_integrity=True, sort=False)
+    edges = edges.append(rlways_edges, ignore_index=False,
+                         verify_integrity=True, sort=False)
+
+
+def add_waterways(filepaths: list,
+                  transport_params: dict,
+                  nodes: gpd.GeoDataFrame,
+                  edges: gpd.GeoDataFrame):
+    logging.debug('Loading waterways data')
+    wtrways_nodes, wtrways_edges = load_transport_data(
+        filepaths, transport_params, "waterways")
+    logging.debug(f"{wtrways_nodes.shape[0]}   waterways nodes and " +
+                  f"{wtrways_edges.shape[0]}   waterways edges")
+    wtrways_nodes, wtrways_edges = offset_ids(wtrways_nodes,
+                                              wtrways_edges,
+                                              offset_node_id=nodes['id'].
+                                              max()+1,
+                                              offset_edge_id=edges['id'].
+                                              max()+1)
+    nodes = nodes.append(wtrways_nodes, ignore_index=False,
+                         verify_integrity=True, sort=False)
+    edges = edges.append(wtrways_edges, ignore_index=False,
+                         verify_integrity=True, sort=False)
+
+
+def add_maritime(filepaths: list,
+                 transport_params: dict,
+                 nodes: gpd.GeoDataFrame,
+                 edges: gpd.GeoDataFrame):
+    logging.debug('Loading maritime data')
+    maritime_nodes, maritime_edges = load_transport_data(
+        filepaths, transport_params, "maritime")
+    logging.debug(f"{maritime_nodes.shape[0]}   maritime nodes and " +
+                  f"{maritime_edges.shape[0]}   maritime edges")
+    maritime_nodes, maritime_edges = offset_ids(maritime_nodes,
+                                                maritime_edges,
+                                                offset_node_id=nodes['id'].
+                                                max()+1,
+                                                offset_edge_id=edges['id'].
+                                                max()+1)
+    nodes = nodes.append(maritime_nodes, ignore_index=False,
+                         verify_integrity=True, sort=False)
+    edges = edges.append(maritime_edges, ignore_index=False,
+                         verify_integrity=True, sort=False)
+
+
+def add_multimodal(filepaths: list,
+                   transport_params: dict,
+                   nodes: gpd.GeoDataFrame,
+                   edges: gpd.GeoDataFrame,
+                   transport_modes: list):
+    logging.debug('Loading multimodal data')
+    multimodal_edges = load_transport_data(
+        filepaths, transport_params, "multimodal")
+    multimodal_edges = filter_mmodal_edges(
+        multimodal_edges, transport_modes)
+    logging.debug(f"{multimodal_edges.shape[0]}   multimodal edges")
+    multimodal_edges = assign_endpoints(multimodal_edges, nodes)
+    multimodal_edges['id'] = multimodal_edges['id'] + edges['id'].max() + 1
+    multimodal_edges.index = multimodal_edges['id']
+    multimodal_edges.index.name = "index"
+    edges = edges.append(multimodal_edges, ignore_index=False,
+                         verify_integrity=True, sort=False)
+    logging.debug(f'Total nb of transport nodes: {nodes.shape[0]}')
+    logging.debug(f'Total nb of transport edges: {edges.shape[0]}')
 
 
 def filter_sector(sector_table, cutoff=0.1, cutoff_type="percentage",
@@ -504,8 +583,9 @@ def resc_nb_firms(filepath_district_sector_importance,
     agri_sectors = sector_table.loc[sector_table['type']
                                     == "agriculture", "sector"].tolist()
     if len(agri_sectors) > 0:
-        logging.info('Cutoff is '+str(district_sector_cutoff/2)+" for agriculture sectors, " +
-                     str(district_sector_cutoff)+" otherwise")
+        logging.info(f'Cutoff is {district_sector_cutoff/2}\
+             for agriculture sectors, ' +
+                     f"{district_sector_cutoff}   otherwise")
         boolindex_overthreshold = table_district_sector_importance[
             'importance'] >= district_sector_cutoff
         boolindex_agri = (table_district_sector_importance['sector'].isin(agri_sectors)) & \
@@ -586,7 +666,7 @@ def resc_nb_firms(filepath_district_sector_importance,
         )
         # Add utilities, transport, and services as virtuval firms
         if len(service_sectors_present) > 1:
-            firm_table_services = pd.DataFrame({
+            firm_table_services = gpd.GeoDataFrame({
                 'odpoint': -1,
                 'importance': 1/2,
                 "sector": service_sectors_present*2,
@@ -833,7 +913,7 @@ def load_invents(firm_list, inventory_duration_target=2,
                 input_sector: max(min_inventory, inventory)
                 for input_sector, inventory in firm.inventory_duration_target.items()
             }
-    # inventory_table = pd.DataFrame({
+    # inventory_table = gpd.GeoDataFrame({
     #     'id': [firm.pid for firm in firm_list],
     #     'buying_sector': [firm.sector for firm in firm_list],
     #     'inventories': [firm.inventory_duration_target for firm in firm_list]
