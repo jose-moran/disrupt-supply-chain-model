@@ -138,10 +138,10 @@ logging.info('The filtered sectors are: '+str(filtered_sectors))
 # Filter district sector combination
 logging.info('Generating the firm table. ' +
              'Districts included: '+str(districts_to_include) +
-             ', district sector cutoff: '+str(district_sector_cutoff))
+             ', district sector cutoff: '+str(district_sec_cutoff))
 firm_table, odpoint_table, filtered_district_sector_table = \
     resc_nb_firms(filepaths['district_sector_importance'], sector_table,
-                  transport_nodes, district_sector_cutoff, nb_top_district_per_sector,
+                  transport_nodes, district_sec_cutoff, nb_top_district_per_sector,
                   explicit_service_firm=explicit_service_firm,
                   sectors_to_include=filtered_sectors, districts_to_include=districts_to_include)
 #firm_table.to_csv(os.path.join("output", "Test", 'firm_table.csv'))

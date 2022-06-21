@@ -36,10 +36,10 @@ export = {
     # Each columns is a time series
     # Exports:
     # - aggregate production
-    # - total profit, 
-    # - household consumption, 
-    # - household expenditure, 
-    # - total transport costs, 
+    # - total profit,
+    # - household consumption,
+    # - household expenditure,
+    # - total transport costs,
     # - average inventories.
     "time_series": False,
 
@@ -122,11 +122,11 @@ countries_to_include = "all"
 # - for each sector, the most important district is kept, even if its importance is lower.
 # It avoids having no firm at all from a sector
 # - for agriculture, the cutoff value is twice lower. If we apply the same cutoff value as the other sector
-# all districts are filtered out. This is because, agriculture is generally spread over 
+# all districts are filtered out. This is because, agriculture is generally spread over
 # the country, such that importance values are low and rather uniformly distributed.
-district_sector_cutoff = 0.003
+district_sec_cutoff = 0.003
 
-# For each sector, how many of the most important districts will be kept, whatever the 'district_sector_cutoff' value
+# For each sector, how many of the most important districts will be kept, whatever the 'district_sec_cutoff' value
 # Possible values:
 # - None: no extra district will be kept using this method
 # - Integer > 0: nb of top district to keep
@@ -143,7 +143,7 @@ explicit_service_firm = True
 # production targets without ordering more inputs for the specified number of time steps.
 # Two types of value are possible:
 # - an integer value: all firms have the same inventory duration target for all inputs
-# - 'inputed': values are provided in an external file, which a specific duration target to each input-sector, buying-firm-sector combination 
+# - 'inputed': values are provided in an external file, which a specific duration target to each input-sector, buying-firm-sector combination
 inventory_duration_target = 2
 
 # Extend the inventory duration targets of all firms, uniformly
@@ -179,14 +179,14 @@ utilization_rate = 0.8
 # Determines which inputs will be kept in the firms' Leontief production function
 # It sets to 0 the elements of the technical coefficient IO matrix that are below this cutoff
 # E.g., if sector A uses 0.3 input of sector B and 0.005 input of sector C to produce 1 unit of output (data from
-# the technical coefficient matrix), then, with a io_cutoff of 0.01, firms for sector A will only source inputs from 
+# the technical coefficient matrix), then, with a io_cutoff of 0.01, firms for sector A will only source inputs from
 # sector B firms.
 io_cutoff = 0.01
 
 # Determines the way firms ration their clients if they cannot meet all demand
 # Possible values are:
 # - 'equal': all clients are equally rationned in proportion of their order
-# - 'household_first': if the firm sells to both households and other firms, then households are served first 
+# - 'household_first': if the firm sells to both households and other firms, then households are served first
 rationing_mode = "household_first"
 
 # Set the number of supplier that firms have for each type of input
@@ -207,7 +207,7 @@ weight_localization = 1
 # - None: no disruption is made. The model is only initialized at t=0, and stops.
 # Metrics describing the initial state are exported.
 # - a dic: {
-#       "disrupt_nodes_or_edges": "nodes" or "edges", 
+#       "disrupt_nodes_or_edges": "nodes" or "edges",
 #        "nodeedge_tested": object
 #   }
 #   - "disrupt_nodes_or_edges" determines whether nodes or edges are to be dirupted.
@@ -236,17 +236,17 @@ nodeedge_tested_topn = None
 nodeedge_tested_skipn = None
 
 # Run the model in the "Aggregate IO mode"
-# Instead of disrupting the transport network, we evaluate how much production would be blocked if all the firms 
+# Instead of disrupting the transport network, we evaluate how much production would be blocked if all the firms
 # located in the disrupted nodes were unable to produce. Then we uniformly distribute this drop of production on
 # all the firm of the corresponding sector.
 model_IO = False
 
 # Provides default simulation duration Tfinal for different disruption duration
 duration_dic = {
-    1:4, 
-    2:8, 
-    3:11, 
-    4:14
+    1: 4,
+    2: 8,
+    3: 11,
+    4: 14
 }
 
 # Whether or not to load extra roads in the model
@@ -257,17 +257,17 @@ extra_roads = False
 # If None, then we use the default simulation duration Tfinal, see duration_dic
 epsilon_stop_condition = 1e-3
 
-# Characteristic of the transport edges that the path chosen by firms to 
+# Characteristic of the transport edges that the path chosen by firms to
 # deliver to their to clients should minimized
 # Possible values are:
 # - time_cost
 # - cost_per_ton
-route_optimization_weight = "time_cost" 
+route_optimization_weight = "time_cost"
 
 # How to translate an increase in transport cost into increase in prices
 cost_repercussion_mode = "type1"
 
 # Whether or not to account for transport network capacity
-# If True, then each shipment adds a "load" on transport edges 
+# If True, then each shipment adds a "load" on transport edges
 # it the load exceed the capacity, then the edges cannot be used anymore
 account_capacity = True

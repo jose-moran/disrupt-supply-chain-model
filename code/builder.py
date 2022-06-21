@@ -283,7 +283,7 @@ def create_transp_netwrk(transport_modes: list,
 
     It uses one shapefile for the nodes and another for the edges.
     Note that there are strong constraints on these files, in particular on
-    their attributes. 
+    their attributes.
     We can optionally use an additional edge shapefile, which contains extra
     road segments. Useful for scenario testing.
 
@@ -348,18 +348,7 @@ def create_transp_netwrk(transport_modes: list,
                        transport_modes=transport_modes)
 
     # Check conformity
-    if (nodes['id'].duplicated().sum() > 0):
-        raise ValueError('The following node ids are duplicated: ' +
-                         nodes.loc[nodes['id'].duplicated(), "id"])
-    if (edges['id'].duplicated().sum() > 0):
-        raise ValueError('The following edge ids are duplicated: ' +
-                         edges.loc[edges['id'].duplicated(), "id"])
-    edge_ends = set(edges['end1'].tolist()+edges['end2'].tolist())
-    edge_ends_not_in_node_data = edge_ends - set(nodes['id'])
-    if len(edge_ends_not_in_node_data) > 0:
-        raise KeyError("The following node ids are given as 'end1' or 'end2' in edge data " +
-                       "but are not in the node data: "+str(edge_ends_not_in_node_data))
-
+    check_nodes_edges(nodes, edges)
     # Load the nodes and edges on the transport network object
     logging.debug('Creating transport nodes and edges as a network')
     for road in edges['id']:
@@ -452,17 +441,40 @@ def add_multimodal(filepaths: list,
     logging.debug(f'Total nb of transport edges: {edges.shape[0]}')
 
 
-def filter_sector(sector_table, cutoff=0.1, cutoff_type="percentage",
-                  sectors_to_include="all"):
-    """Filter the sector table to sector whose output is largen than the cutoff value
+def check_nodes_edges(nodes: gpd.GeoDataFrame,
+                      edges: gpd.GeoDataFrame):
+    if (nodes['id'].duplicated().sum() > 0):
+        duplicate_nodes = nodes.loc[nodes['id'].duplicated(), "id"].values
+        raise ValueError(f'The following node ids are duplicated: \
+                         {duplicate_nodes}')
+    if (edges['id'].duplicated().sum() > 0):
+        duplicate_edges = edges.loc[edges['id'].duplicated(), "id"].values
+        raise ValueError(f'The following edge ids are duplicated: \
+                           {duplicate_edges}')
+    edge_ends = set(edges['end1'].tolist()+edges['end2'].tolist())
+    edge_ends_not_in_node_data = edge_ends - set(nodes['id'])
+    if len(edge_ends_not_in_node_data) > 0:
+        raise KeyError(f"The following node ids are given as 'end1' or 'end2'\
+             in edge data but are not in the node data: \
+                 {edge_ends_not_in_node_data}")
+
+
+def filter_sector(sector_table: pd.DataFrame,
+                  cutoff: float = 0.1,
+                  cutoff_type: str = "percentage",
+                  sectors_to_include: Union[str, list[str]] = "all"
+                  ) -> list[str]:
+    """Filter the sector table to sector whose output is larger than the cutoff
+    value.
 
     Parameters
     ----------
-    sector_table : pandas.DataFrame
+    sector_table : pd.DataFrame
         Sector table
     cutoff : float
         Cutoff value for selecting the sectors
-        If cutoff_type="percentage", the sector's output divided by all sectors' output is used
+        If cutoff_type="percentage", the sector's output divided by all
+            sectors' output is used
         If cutoff_type="absolute", the sector's absolute output, in USD, is used
     sectors_to_include : list of string or 'all'
         list of the sectors preselected by the user. Default to "all"
@@ -473,12 +485,12 @@ def filter_sector(sector_table, cutoff=0.1, cutoff_type="percentage",
     """
     if cutoff_type == "percentage":
         rel_output = sector_table['output'] / sector_table['output'].sum()
-        filtered_sectors = sector_table.loc[rel_output >
-                                            cutoff, "sector"].tolist()
+        query = rel_output > cutoff
+        filtered_sectors = sector_table.loc[query, "sector"].tolist()
 
     elif cutoff_type == "absolute":
-        filtered_sectors = sector_table.loc[sector_table['output'] > cutoff, "sector"].tolist(
-        )
+        query = sector_table['output'] > cutoff
+        filtered_sectors = sector_table.loc[query, "sector"].tolist()
 
     else:
         raise ValueError("cutoff type should be 'percentage' or 'absolute'")
@@ -491,8 +503,8 @@ def filter_sector(sector_table, cutoff=0.1, cutoff_type="percentage",
         if (len(set(sectors_to_include) - set(filtered_sectors)) > 0):
             selected_but_filteredout_sectors = list(
                 set(sectors_to_include) - set(filtered_sectors))
-            logging.info("The following sectors were specifically selected but were filtered out" +
-                         str(selected_but_filteredout_sectors))
+            logging.info(f"The following sectors were specifically selected\
+                 but were filtered out: {selected_but_filteredout_sectors}")
 
         return list(set(sectors_to_include) & set(filtered_sectors))
 
@@ -500,26 +512,33 @@ def filter_sector(sector_table, cutoff=0.1, cutoff_type="percentage",
         return filtered_sectors
 
 
-def extrct_0dpt_tbl_frm_transp_nodes(transport_nodes):
+def extrct_0dpt_tbl_frm_transp_nodes(transport_nodes: gpd.GeoDataFrame
+                                     ) -> gpd.GeoDataFrame:
     table_odpoints = transport_nodes.dropna(axis=0, subset=['special'])
     table_odpoints = table_odpoints[table_odpoints['special'].str.contains(
         'odpoint')]
     table_odpoints['long'] = table_odpoints.geometry.x
     table_odpoints['lat'] = table_odpoints.geometry.y
-    table_odpoints = table_odpoints[["id", "district", "long", "lat"]].rename(columns={
-                                                                              'id': 'odpoint'})
+    sel = ["id", "district", "long", "lat"]
+    table_odpoints = table_odpoints[sel].rename(columns={'id': 'odpoint'})
     table_odpoints['nb_points_same_district'] = table_odpoints['district'].map(
         table_odpoints['district'].value_counts())
     return table_odpoints
 
 
-def resc_nb_firms(filepath_district_sector_importance,
-                  sector_table, transport_nodes,
-                  district_sector_cutoff, nb_top_district_per_sector, explicit_service_firm,
-                  sectors_to_include="all", districts_to_include="all"):
+def resc_nb_firms(fpath_district_sect_imptance: str,
+                  sector_table: pd.DataFrame,
+                  transport_nodes: gpd.GeoDataFrame,
+                  district_sec_cutoff: float,
+                  nb_top_district_per_sector: Union[None, int],
+                  explicit_service_firm: bool,
+                  sectors_to_include: Union[str, list[str]] = 'all',
+                  districts_to_include: Union[str, list[str]] = 'all'
+                  ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """Generate the firm data
 
-    It uses the district_sector_importance table, the odpoints, the cutoff values to generate the list of firms.
+    It uses the district_sector_importance table, the odpoints, the cutoff
+    values to generate the list of firms.
     It generates a tuple of 3 pandas.DataFrame:
     - firm_table
     - odpoint_table
@@ -527,14 +546,14 @@ def resc_nb_firms(filepath_district_sector_importance,
 
     Parameters
     ----------
-    filepath_district_sector_importance : string
+    fpath_district_sect_imptance : string
         Path for the district_sector_importance table
     transport_nodes : geopandas.DataFrame
         Table of transport nodes
     sector_table : pandas.DataFrame
         Sector table
-    district_sector_cutoff : float
-        Cutoff value for selecting the combination of district and sectors. 
+    district_sec_cutoff : float
+        Cutoff value for selecting the combination of district and sectors.
         For agricultural sector it is divided by two.
     nb_top_district_per_sector : None or integer
         Nb of extra district to keep based on importance rank per sector
@@ -551,17 +570,19 @@ def resc_nb_firms(filepath_district_sector_importance,
     """
 
     # Load
-    table_district_sector_importance = pd.read_csv(filepath_district_sector_importance,
-                                                   dtype={'district': str, 'sector': str, "importance": float})
+    tbl_district_sec_imptance = pd.read_csv(fpath_district_sect_imptance,
+                                            dtype={'district': str,
+                                                   'sector': str,
+                                                   "importance": float})
 
     # Filter out combination with 0 importance
-    table_district_sector_importance = \
-        table_district_sector_importance[table_district_sector_importance['importance'] != 0]
+    tbl_district_sec_imptance = \
+        tbl_district_sec_imptance[tbl_district_sec_imptance['importance'] != 0]
 
     # Keep only selected sectors, if applicable
     if isinstance(sectors_to_include, list):
-        table_district_sector_importance = \
-            table_district_sector_importance[table_district_sector_importance['sector'].isin(
+        tbl_district_sec_imptance = \
+            tbl_district_sec_imptance[tbl_district_sec_imptance['sector'].isin(
                 sectors_to_include)]
     elif (sectors_to_include != 'all'):
         raise ValueError(
@@ -569,35 +590,35 @@ def resc_nb_firms(filepath_district_sector_importance,
 
     # Keep only selected districts, if applicable
     if isinstance(districts_to_include, list):
-        table_district_sector_importance = \
-            table_district_sector_importance[table_district_sector_importance['district'].isin(
-                districts_to_include)]
+        included_dists = tbl_district_sec_imptance['district'].isin(
+            districts_to_include)
+        tbl_district_sec_imptance = tbl_district_sec_imptance[included_dists]
     elif (districts_to_include != 'all'):
         raise ValueError(
             "'districts_to_include' should be a list of string or 'all'")
 
-    logging.info('Nb of combinations (district, sector) before cutoff: ' +
-                 str(table_district_sector_importance.shape[0]))
+    logging.info(f'Nb of combinations (district, sector) before cutoff: \
+        {tbl_district_sec_imptance.shape[0]}')
 
     # Filter district-sector combination that are above the cutoff value
     agri_sectors = sector_table.loc[sector_table['type']
                                     == "agriculture", "sector"].tolist()
     if len(agri_sectors) > 0:
-        logging.info(f'Cutoff is {district_sector_cutoff/2}\
-             for agriculture sectors, ' +
-                     f"{district_sector_cutoff}   otherwise")
-        boolindex_overthreshold = table_district_sector_importance[
-            'importance'] >= district_sector_cutoff
-        boolindex_agri = (table_district_sector_importance['sector'].isin(agri_sectors)) & \
-            (table_district_sector_importance['importance']
-             >= district_sector_cutoff/2)
-        filtered_district_sector_table = table_district_sector_importance[boolindex_overthreshold | boolindex_agri].copy(
+        logging.info(f"Cutoff is {district_sec_cutoff/2}\
+             for agriculture sectors, {district_sec_cutoff}   otherwise")
+        overthresh = tbl_district_sec_imptance[
+            'importance'] >= district_sec_cutoff
+        agri_sel = tbl_district_sec_imptance['sector'].isin(agri_sectors)
+        boolindex_agri = (agri_sel) & (
+            tbl_district_sec_imptance['importance'] >= district_sec_cutoff/2
         )
+        filtered_district_sector_table = tbl_district_sec_imptance[
+            overthresh | boolindex_agri].copy()
     else:
-        logging.info('Cutoff is '+str(district_sector_cutoff))
-        boolindex_overthreshold = table_district_sector_importance[
-            'importance'] >= district_sector_cutoff
-        filtered_district_sector_table = table_district_sector_importance[boolindex_overthreshold].copy(
+        logging.info('Cutoff is '+str(district_sec_cutoff))
+        overthresh = tbl_district_sec_imptance[
+            'importance'] >= district_sec_cutoff
+        filtered_district_sector_table = tbl_district_sec_imptance[overthresh].copy(
         )
     logging.info('Nb of combinations (district, sector) after cutoff: ' +
                  str(filtered_district_sector_table.shape[0]))
@@ -606,9 +627,9 @@ def resc_nb_firms(filepath_district_sector_importance,
     if isinstance(nb_top_district_per_sector, int):
         if nb_top_district_per_sector > 0:
             top_district_sector = pd.concat([
-                table_district_sector_importance[table_district_sector_importance['sector'] == sector].nlargest(
+                tbl_district_sec_imptance[tbl_district_sec_imptance['sector'] == sector].nlargest(
                     nb_top_district_per_sector, 'importance')
-                for sector in table_district_sector_importance['sector'].unique()
+                for sector in tbl_district_sec_imptance['sector'].unique()
             ])
             filtered_district_sector_table = pd.concat(
                 [filtered_district_sector_table, top_district_sector]).drop_duplicates()
@@ -686,7 +707,7 @@ def resc_nb_firms(filepath_district_sector_importance,
     # Create OD table
     od_table = od_sector_table.copy()
     od_table = od_table[['odpoint', 'district',
-                         'nb_points_same_district', 'long', 'lat']]
+                        'nb_points_same_district', 'long', 'lat']]
     od_table = od_table.drop_duplicates().sort_values('odpoint')
 
     logging.info('Nb of od points chosen: '+str(len(set(firm_table['odpoint']))) +
@@ -702,24 +723,23 @@ def create_firms(firm_table, keep_top_n_firms=None, reactivity_rate=0.1, utiliza
     It uses firm_table from resc_nb_firms
 
     Parameters
-    ----------
+    - ---------
     firm_table: pandas.DataFrame
-        firm_table from resc_nb_firms
+       firm_table from resc_nb_firms
 
     keep_top_n_firms: None (default) or integer
-        (optional) can be specified if we want to keep only the first n firms, for testing purposes
+       (optional) can be specified if we want to keep only the first n firms, for testing purposes
 
     reactivity_rate: float
-        Determines the speed at which firms try to reach their inventory duration target. Default to 0.1.
+       Determines the speed at which firms try to reach their inventory duration target. Default to 0.1.
 
     utilization_rate: float
-        Set the utilization rate, which determines the production capacity at the input-output equilibrium.
+       Set the utilization rate, which determines the production capacity at the input-output equilibrium.
 
     Returns
-    -------
+    - ------
     list of Firms
     """
-
     if isinstance(keep_top_n_firms, int):
         firm_table = firm_table.iloc[:keep_top_n_firms, :]
 
@@ -751,21 +771,21 @@ def load_tech_coeffs(firm_list, filepath_tech_coef, io_cutoff=0.1, import_sector
     """Load the input mix of the firms' Leontief function
 
     Parameters
-    ----------
-    firm_list : pandas.DataFrame
-        the list of Firms generated from the create_firms function
+    - ---------
+    firm_list: pandas.DataFrame
+       the list of Firms generated from the create_firms function
 
-    filepath_tech_coef : string
-        Filepath to the matrix of technical coefficients
+    filepath_tech_coef: string
+       Filepath to the matrix of technical coefficients
 
-    io_cutoff : float
-        Filters out technical coefficient below this cutoff value. Default to 0.1.
+    io_cutoff: float
+       Filters out technical coefficient below this cutoff value. Default to 0.1.
 
-    imports : None or string
-        Give the name of the import sector. If None, then the import technical coefficient is discarded. Default to None.
+    imports: None or string
+       Give the name of the import sector. If None, then the import technical coefficient is discarded. Default to None.
 
     Returns
-    -------
+    - ------
     list of Firms
     """
 
@@ -807,35 +827,34 @@ def load_invents(firm_list, inventory_duration_target=2,
     We can also add some noise on the distribution of inventories. Not yet imlemented.
 
     Parameters
-    ----------
-    firm_list : pandas.DataFrame
-        the list of Firms generated from the create_firms function
+    - ---------
+    firm_list: pandas.DataFrame
+       the list of Firms generated from the create_firms function
 
-    inventory_duration_target : "inputed" or integer
-        Inventory duration target uniformly applied to all firms and all inputs.
-        If 'inputed', uses the specific values from the file specified by 
+    inventory_duration_target: "inputed" or integer
+       Inventory duration target uniformly applied to all firms and all inputs.
+        If 'inputed', uses the specific values from the file specified by
         filepath_inventory_duration_targets
 
-    extra_inventory_target : None or integer
-        If specified, extra inventory duration target.
+    extra_inventory_target: None or integer
+       If specified, extra inventory duration target.
 
-    inputs_with_extra_inventories : None or list of sector
-        For which inputs do we add inventories.
+    inputs_with_extra_inventories: None or list of sector
+       For which inputs do we add inventories.
 
-    buying_sectors_with_extra_inventories : None or list of sector
-        For which sector we add inventories.
+    buying_sectors_with_extra_inventories: None or list of sector
+       For which sector we add inventories.
 
-    min_inventory : int
-        Set a minimum inventory level
+    min_inventory: int
+       Set a minimum inventory level
 
     random_mean_sd: None
-        Not yet implemented.
+       Not yet implemented.
 
     Returns
-    -------
-        list of Firms
+    - ------
+       list of Firms
     """
-
     if isinstance(inventory_duration_target, int):
         for firm in firm_list:
             firm.inventory_duration_target = {
